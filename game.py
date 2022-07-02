@@ -58,24 +58,67 @@ class Game:
         for p in self.players:
             p.dice.roll()
         self.refresh_ttl_dice()
+        
+def pick_valid_move(node:str) -> str:
+    if node.endswith('c'): 
+        return ''
+    
+    bid = [str(i) for i in range(3, 10)]
+    value = [str(i) for i in range(1, 7)]
 
-# if __name__ == "__main__":
-    # d1 = Dice(pattern='33451')
-    # d2 = Dice(pattern='33451')
-    # p1 = Player(dice = d1, name = "p1")
-    # p2 = Player(dice = d2, name = "p2")
-    # game = Game()
-    # game.add_player(p1)
-    # game.add_player(p2)
+    if len(node) == 10:
+        valid_move = [b + v for b in bid for v in value]
+        
+    else:
+        last_bid = int(node[-2])
+        last_value = int(node[-1])
+        
+        assert(last_bid <= 9 and last_value <= 6)
+        
+        wild_one = not '1' in node[10:]
+        
+        valid_move = []
+        # get valid moves with the same bid
+        if wild_one:
+            greater_values = [str(i) for i in range(last_value + 1, 7)] + ['1']
+        else:
+            greater_values = [str(i) for i in range(last_value + 1, 7)]
+            
+        valid_move += [str(last_bid) + greater_val for greater_val in greater_values]
+        
+        # get valid moves with greater bid
+        greater_bid = [str(i) for i in range(last_bid + 1, 10)]
+        
+        if wild_one:
+            valid_move += [b + v for b in greater_bid for v in value]
+        else:
+            valid_move += [b + v for b in greater_bid for v in value[1:]] # no 1's
+        
+        valid_move += ['c']
+        print(valid_move)
+    return random.choice(valid_move)
 
-    # print(p1.dice)
-    # print(p2.dice)
+if __name__ == "__main__":
+    node = '11111111115678'
+    valid_move = pick_valid_move(node)
+    print(valid_move)
 
-    # game.refresh_ttl_dice()
+#     d1 = Dice(pattern='33451')
+#     d2 = Dice(pattern='33451')
+#     p1 = Player(dice = d1, name = "p1")
+#     p2 = Player(dice = d2, name = "p2")
+#     game = Game()
+#     game.add_player(p1)
+#     game.add_player(p2)
 
-    # bid = random.randint(0,9) * 10 + random.randint(1,6)
-    # print(f"the bid is {bid // 10} {bid % 10}'s")
+#     print(p1.dice)
+#     print(p2.dice)
 
-    # print(f"the number of dice in the game is: {game.total_dice}")
+#     game.refresh_ttl_dice()
 
-    # print(f"the challenge result is: {game.challenge(bid)}")
+#     bid = random.randint(0,9) * 10 + random.randint(1,6)
+#     print(f"the bid is {bid // 10} {bid % 10}'s")
+
+#     print(f"the number of dice in the game is: {game.total_dice}")
+
+#     print(f"the challenge result is: {game.challenge(bid)}")
