@@ -1,5 +1,5 @@
 from game import Game
-import game
+from game import pick_valid_move, result
 from dice import Dice
 from player import Player
 import pandas as pd
@@ -7,65 +7,99 @@ import numpy as np
 import random
 import time 
 
+random.seed(37)
+
 class MCTS_Trainer:
     def __init__(self, game: Game, time, comp_power: int):
         assert(isinstance(game, Game))
         assert(game.players != [])
         self.game = game
         self.trees = pd.DataFrame(columns=['parent', 'children', 'wins', 
-                                            'visits', 'wins', 'uct_value'])
+                                            'visits'])
         self.time = time
         self.comp_power = comp_power
 
-    def resources_left(time, comp_power):
-        return time.time() < time and comp_power > 0
+    def resources_left(self, end_time, comp_power):
+        return time.time() < end_time and comp_power > 0
 
     def monte_carlo_tree_search(self, root):
+        self.init_tree(root)
+        
         while self.resources_left(self.time, self.comp_power):
             leaf = self.traverse(root)
-            simulation_result = self.rollout(leaf)
-            self.backpropagate(leaf, simulation_result)
+            extended_leaf, simulation_result = self.rollout(leaf)
+            self.backpropagate(extended_leaf, simulation_result)
             
         return self.best_child(root)
-
+    
+    def init_tree(self, root):
+        self.trees.loc[root] = {'parent': None, 'children': [], 
+                         'wins': 0, 'visits': 0}
+    
     def fully_expanded(self, node):
         return self.trees.loc[node]['children'] == []
 
     def best_uct(self, node) -> str:
         parent = self.trees.loc[node].copy()
-        children = parent['children'].values # type is numpy.ndarray of str
+        parent_visit = parent['visits']
+        
+        children = parent['children'] # type is numpy.ndarray of str
 
         # filter children nodes
         children = self.trees.loc[children]
-        best_child = children.loc[children['uct_value'] == max(children['uct_value'])] # type is pandas.DataFrame
+        children = children.loc[children['visits'] > 0]
 
-        return best_child['id'].values[0]
+        # explore ratio = 0.1
+        uct_values = children['wins'] / children['visits'] + \
+            0.1 * np.sqrt(np.log(parent_visit) / children['visits'].astype('float'))
+        
+        best_children = uct_values[uct_values == max(uct_values)].index
+       
+        best_child = random.choice(best_children)
 
-    def pick_unvisited(children): # TODO: need to check later
-        for child in children:
-            if child.visits == 0:
-                return child
-        return None
+        return best_child
+
+    def pick_unvisited(self, parent):
+        children = self.trees.loc[parent]['children'] # type is list of str
+
+        # filter children nodes
+        children = self.trees.loc[children].index
+        
+        if len(children) == 0:
+            return None
+        else:
+            return random.choice(children)
 
     # function for node traversal
     def traverse(self, node):
-        while self.fully_expanded(node):
-            node = self.best_uct(node)
-        
-        # TODO: what is the following line for?            
+        while not self.fully_expanded(node):
+            # explore ratio = 0.1
+            random_num = np.random.rand()
+            if random_num < 0.1:
+                child = pick_valid_move(node)
+            
+                # TODO: when to update the visits and values??
+                # fill data to tree table
+                self.trees.loc[node + child] = {'parent': node, 'children': [], 
+                                         'wins': 0, 'visits': 0}
+                self.trees.loc[node]['children'].append(node + child)
+                
+                return (node + child)
+            else:
+                node = self.best_uct(node)
         # in case no children are present / node is terminal 
-        return self.pick_unvisited(node.children) or node
+        return self.pick_unvisited(node) or node
 
-    def non_terminal(node):
+    def non_terminal(self, node):
         return not node.endswith('c') # c stands for challenge
 
     # function for the result of the simulation
     def rollout(self, node):
         while self.non_terminal(node):
             node = self.rollout_policy(node)
-        return result(node)
+        return node, result(node)
 
-    def pick_random(children):
+    def pick_random(self, children):
         return random.choice(children)
 
     # function for randomly selecting a child node
@@ -75,34 +109,39 @@ class MCTS_Trainer:
         # check if node has children
         if self.fully_expanded(node):
             # randomly create a valid child for node
-            child = game.pick_valid_move(node)
+            child = pick_valid_move(node)
             
             # TODO: when to update the visits and values??
             # fill data to tree table
-            self.trees.loc[child] = {'parent': node, 'children': [], 
-                                     'wins': 0, 'visits': 0, 'value': 0}
+            self.trees.loc[node + child] = {'parent': node, 'children': [], 
+                                     'wins': 0, 'visits': 0}
+            self.trees.loc[node]['children'].append(node + child)
         
-        return self.pick_random(node.children)
+        return self.pick_random(self.trees.loc[node]['children'])
 
-    def is_root(node): # TODO: need to check later
-        return node.parent == None
+    def is_root(self, node): # TODO: need to check later
+        return self.trees.loc[node]['parent'] == '' or \
+            self.trees.loc[node]['parent'] is None
 
-    def update_stats(node, result): # TODO: need to check later
-        node.visits += 1
-        node.wins += result
-        return node.wins / node.visits
+    def update_stats(self, node, result): # TODO: need to check later
+        self.trees.loc[node]['visits'] += 1
+        self.trees.loc[node]['wins'] += result
 
     # function for backpropagation
     def backpropagate(self, node, result):
-        if self.is_root(node): return
-        node.stats = self.update_stats(node, result)
-        self.backpropagate(node.parent)
+        while not self.is_root(node):
+            self.update_stats(node, result)
+            node = self.trees.loc[node]['parent']
+        
+        # also update the root
+        self.update_stats(node, result)
 
     # function for selecting the best child
     # node with highest number of visits
     def best_child(self, node):
         # pick child with highest number of visits
-        return max(node.children, key=lambda child: child.visits)
+        # todo: palce holder value 
+        return None
 
 
 if __name__ == '__main__':
@@ -114,5 +153,6 @@ if __name__ == '__main__':
     game.add_player(p1)
     game.add_player(p2)
 
-    train_time = 60 * 10 # 10 minutes
+    train_time = 30 * 60 # 30 minutes
     trainer = MCTS_Trainer(game, time.time() + train_time, comp_power = 10) 
+    trainer.monte_carlo_tree_search('3345133451')

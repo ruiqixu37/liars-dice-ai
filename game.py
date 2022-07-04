@@ -3,6 +3,8 @@ from dice import Dice
 from player import Player
 import random
 
+random.seed(37)
+
 class Game:
     """
     engine for the liar's dice game 
@@ -95,13 +97,31 @@ def pick_valid_move(node:str) -> str:
             valid_move += [b + v for b in greater_bid for v in value[1:]] # no 1's
         
         valid_move += ['c']
-        print(valid_move)
+        # print(valid_move)
     return random.choice(valid_move)
 
-if __name__ == "__main__":
-    node = '11111111115678'
-    valid_move = pick_valid_move(node)
-    print(valid_move)
+def result(node:str) -> str:
+    assert(node.endswith('c') and len(node) >= 12)
+    
+    bid = node[-3]
+    val = node[-2]
+    
+    wild_one = not '1' in node[10:]
+    
+    dice = {str(val):0 for val in range(1,7)}
+    for d in node[:10]:
+        dice[d] += 1
+        
+    # wins if the bid is fake
+    if wild_one:
+        return int(bid) > dice[val] + dice['1']
+    else:
+        return int(bid) > dice[val]
+
+# if __name__ == "__main__":
+#     node = '123451234534c'
+#     valid_move = result(node)
+#     print(valid_move)
 
 #     d1 = Dice(pattern='33451')
 #     d2 = Dice(pattern='33451')
