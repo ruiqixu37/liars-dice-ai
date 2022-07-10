@@ -101,7 +101,7 @@ def pick_valid_move(node:str) -> str:
     return random.choice(valid_move)
 
 def result(node:str) -> str:
-    assert(node.endswith('c') and len(node) >= 12)
+    assert(node.endswith('c') and len(node) >= 13)
     
     bid = node[-3]
     val = node[-2]
