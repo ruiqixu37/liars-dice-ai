@@ -1,302 +1,218 @@
+from state import State
 from collections import defaultdict
+from game import init_player_dice, init_state
 import time
 import numpy as np
-import random
+import os
+import json
 
-random.seed(37)
-np.random.seed(37)
-
-STRATEGY_INTERVAL = 10000
+STRATEGY_INTERVAL = 1000
 PRUNE_THRESHOLD = 200 * 60  # 200 minutes
 LCFR_TRESHOLD = 400 * 60  # 400 minutes
 DISCOUNT_INTERVAL = 10 * 60  # 10 minutes
-REGRET_PRUNE_THRESHOLD = -3 * 1e5
+REGRET_PRUNE_THRESHOLD = -300
 
-# R for regret, S for state
-R = defaultdict(lambda: 0.0)
-sigma = defaultdict(lambda: 0.0)
-S = defaultdict(lambda: 0.0)
-explored = defaultdict(lambda: False)
-phi = defaultdict(lambda: 0.0)
+# # R for regret, S for state
+# R = defaultdict(lambda: 0.0)
+# sigma = defaultdict(lambda: 0.0)
+# S = defaultdict(lambda: 0.0)
+# explored = defaultdict(lambda: False)
+# phi = defaultdict(lambda: 0.0)
 
-# def update_strategy(history: str, P: int):
-#     """
-#     :param history: history of the game
-#     :param P: player number
-
-#     Updates the average strategy for player P
-#     """
-#     if _is_terminal(history) or len(history) > :
-#         return
+# Global dictionary for stroing regret, strategy, state and explore values
+# first index is the regret, second index is the strategy,
+# third index is the state, fourth index is the explore value,
+# fifth index is the final strategy value
+# GLOBAL_DICT = defaultdict(lambda: [0.0, 0.0, 0.0, False, 0.0])
 
 
-def _player_of_current_turn(history: str) -> int:
+def calculate_strategy(state: State, global_dict: dict) -> dict:
     """
-    :param history: history of the game
+    :param state: state of the game
+    :param global_dict: global dictionary for storing regret, strategy, state and explore values
 
-    Returns player number of the current turn (0 or 1)
-    """
-    assert (len(history) >= 11 and not history.endswith('c'))
-
-    first_to_act = history[10]
-
-    if (len(history) - 11) % 4 == 0:
-        return first_to_act
-    else:
-        if first_to_act == 0:
-            return 1
-        else:  # first_to_act == 1
-            return 0
-
-
-def _next_valid_move(history: str) -> list:
-    """
-    :param history: history of the game
-
-    Returns a list of valid moves for the current turn
-    """
-    assert (len(history) >= 11)
-
-    if history.endswith('c'):
-        return []
-
-    bid = [str(i) for i in range(3, 10)]
-    value = [str(i) for i in range(1, 7)]
-
-    if len(history) == 11:
-        valid_move = [b + v for b in bid for v in value]
-
-    else:
-        last_bid = int(history[-2])
-        last_value = int(history[-1])
-
-        assert (last_bid <= 9 and last_value <= 6)
-
-        wild_one = '1' not in history[11:]
-
-        valid_move = []
-        # get valid moves with the same bid
-        if wild_one:
-            greater_values = [str(i) for i in range(last_value + 1, 7)] + ['1']
-        else:
-            greater_values = [str(i) for i in range(last_value + 1, 7)]
-
-        valid_move += [str(last_bid) +
-                       greater_val for greater_val in greater_values]
-
-        # get valid moves with greater bid
-        greater_bid = [str(i) for i in range(last_bid + 1, 10)]
-
-        if wild_one:
-            valid_move += [b + v for b in greater_bid for v in value]
-        else:
-            # no 1's
-            valid_move += [b + v for b in greater_bid for v in value[1:]]
-
-        valid_move += ['c']
-        # print(valid_move)
-    return valid_move
-
-
-def _utility(history: str, P: int) -> float:
-    """
-    :param history: history of the game
-    :param P: player number
-
-    Returns utility value for terminal node
-    """
-    assert (history.endswith('c') and len(history) >= 14)
-
-    bid = history[-3]
-    val = history[-2]
-
-    first_to_act = int(history[10])
-    wild_one = '1' not in history[11:]
-
-    dice = {str(val): 0 for val in range(1, 7)}
-    for d in history[:10]:
-        dice[d] += 1
-
-    if wild_one:
-        if int(bid) > dice[val] + dice['1']:
-            result = 1
-        else:
-            result = -1
-    else:
-        if int(bid) > dice[val]:
-            result = 1
-        else:
-            result = -1
-    if (len(history) + 1 - 11) % 4 == 0:
-        if first_to_act == P:
-            return -1.0 * result
-        else:
-            return 1.0 * result
-    else:
-        if first_to_act == P:
-            return 1.0 * result
-        else:
-            return -1.0 * result
-
-
-def _is_chance(history: str) -> bool:
-    """
-    :param history: history of the game
-
-    Returns True if the game is chance node
-    """
-    return len(history) <= 10
-
-
-def _chance_action(history: str) -> str:
-    """
-    :param history: history of the game
-
-    Returns a random action for chance node
-    """
-    his_len = len(history)
-
-    assert (his_len == 0 or his_len == 10 or his_len == 5)
-
-    if his_len == 10:  # decide who goes first
-        return random.choice(['0', '1'])
-    else:
-        return ''.join([str(random.randint(1, 6)) for _ in range(5)])
-
-
-def _sample_action(history: str) -> str:
-    """
-    :param history: history of the game
-
-    Returns a random action for the current turn based on the strategy profile
-    """
-    assert (len(history) >= 11)
-
-    nonzero_valid_actions = []
-    action_frequencies = np.array([])
-
-    global sigma
-    action_list = _next_valid_move(history)
-    np.random.shuffle(np.array(action_list))
-    for valid_move in action_list:
-        if sigma[history + valid_move] != 0:
-            nonzero_valid_actions.append(valid_move)
-            action_frequencies = np.append(
-                action_frequencies, sigma[history + valid_move])
-
-    assert (len(nonzero_valid_actions) == len(action_frequencies))
-    if (len(nonzero_valid_actions) == 0):
-        return random.choice(action_list)
-
-    action_frequencies = np.divide(
-        action_frequencies, np.sum(action_frequencies))
-    action_frequencies = np.cumsum(action_frequencies)
-
-    r = random.random()
-    for i in range(len(action_frequencies)):
-        if r < action_frequencies[i]:
-            return nonzero_valid_actions[i]
-
-
-def calculate_strategy(history: str) -> defaultdict:
-    """
-    :param history: history of the game
-
-    Calculates the strategy based on regrets
+    Calculates and update the strategy based on regrets and returns the global dictionary
     """
     regret_sum = 0
-    global R, sigma
+    valid_action_list = state.next_valid_move()
+    for action in valid_action_list:
+        child = state.copy()
+        child.update_history(action)
+        regret_sum += max(global_dict[str(child)][0], 0)
 
-    for valid_move in _next_valid_move(history):
-        regret_sum += max(R[history + valid_move], 0)
-
-    for valid_move in _next_valid_move(history):
+    for action in valid_action_list:
+        child = state.copy()
+        child.update_history(action)
         if regret_sum > 0:
-            sigma[history +
-                  valid_move] = max(R[history + valid_move], 0) / regret_sum
+            global_dict[str(child)][1] = max(global_dict[str(child)][0], 0) / regret_sum
         else:
-            sigma[history + valid_move] = 1 / len(_next_valid_move(history))
+            global_dict[str(child)][1] = 1 / len(valid_action_list)
 
-    return sigma[history]  # may be unnecessary
+    return global_dict
 
 
-def traverse_mccfr(history: str, P: int) -> float:
+def update_strategy(state: State, global_dict: dict) -> dict:
     """
-    :param history: history of the game
-    :param P: player number
+    :param state: state of the game
+    :param global_dict: global dictionary for storing regret, strategy, state and explore values
 
-    Returns utility value for terminal node, or expected value for non-terminal node
+    Updates the strategy based on current regret and state values
+    Returns the global dictionary
     """
 
-    global sigma, R, S
+    if state.is_terminal():
+        return global_dict
+    elif state.player_of_current_turn() == 1:  # agent's turn
+        global_dict = calculate_strategy(state, global_dict)
 
-    if history.endswith('c'):
-        return _utility(history, P)  # TODO: do i need to pass P?
-    elif _is_chance(history):  # TODO: what nodes are chance nodes?
-        # sample an action from the chance probabilities
-        action = _chance_action(history)
-        return traverse_mccfr(history + action, P)
-    elif _player_of_current_turn(history) == P:
+        # sample the action
+        action_probablities = np.array([])
+        valid_action_list = state.next_valid_move()
+        for valid_move in valid_action_list:
+            sub_state = str(state)+str(valid_move[0])+str(valid_move[1])
+            action_probablities = np.append(action_probablities, global_dict[sub_state][1])
+        action_probablities /= np.sum(action_probablities)
+        action = valid_action_list[np.random.choice(len(valid_action_list), p=action_probablities)]
+
+        # update the strategy
+        child_state = state.copy()
+        child_state.update_history(action)
+        global_dict[str(child_state)][4] += 1
+        global_dict = update_strategy(child_state, global_dict)
+    else:  # opponent's turn
+        # iterate through all the valid actions
+        for valid_move in state.next_valid_move():
+            child_state = state.copy()
+            child_state.update_history(valid_move)
+            global_dict = update_strategy(child_state, global_dict)
+
+    return global_dict
+
+
+def sample_opponent_action(state: State, opponent_dice: int) -> tuple:
+    """
+    :param state: state of the game
+    :param opponent_dice: opponent's dice number
+
+    retrieve the opponent's state file and sample the opponent's action
+
+    Returns the opponent's action
+    """
+    # replace the agent's dice with the opponent's dice
+    state.dice = opponent_dice
+    valid_action_list = state.next_valid_move()
+
+    # load the dictionary from the json file
+    if os.path.exists(f'output/{str(state)}.json'):
+        with open(f'output/{str(state)}.json', 'r') as fp:
+            # print(f'reading existing dictionary of dice {state.dice}')
+            opponent_dict = json.load(fp)
+            opponent_dict = defaultdict(lambda: [0.0, 0.0, 0.0, False], opponent_dict)
+
+        opponent_dict = calculate_strategy(state, opponent_dict)
+
+        # get the action probabilities and sample actions
+        action_probablities = np.array([])
+        for valid_move in valid_action_list:
+            sub_state = str(state)+str(valid_move[0])+str(valid_move[1])
+            action_probablities = np.append(action_probablities, opponent_dict[sub_state][1])
+        action_probablities /= np.sum(action_probablities)
+        action = valid_action_list[np.random.choice(len(valid_action_list), p=action_probablities)]
+    else:  # if the dictionary does not exist, sample uniformly
+        action = valid_action_list[np.random.choice(len(valid_action_list))]
+
+    return action
+
+
+def traverse_mccfr(state: State, opponent_dice: int, global_dict: dict) -> float:
+    """
+    :param history: state of the game
+    :param opponent_dice: opponent's dice number
+    :param global_dict: global dictionary for storing regret, strategy, state and explore values
+
+    Returns 1. utility value for terminal node, or expected value for non-terminal node
+            2. global dictionary
+    """
+
+    if state.is_terminal():  # terminal node
+        return state.utility(opponent_dice), global_dict
+    elif state.dice == 0:  # dice have not been rolled, chance node
+        state = init_state(state)
+        return traverse_mccfr(state, opponent_dice, global_dict)
+    elif state.player_of_current_turn() == 1:  # agent's turn
         state_value = 0
-        calculate_strategy(history)
+        global_dict = calculate_strategy(state, global_dict)
 
-        for valid_move in _next_valid_move(history):
-            sub_state_value = traverse_mccfr(history + valid_move, P)
-            S[history + valid_move] = sub_state_value
-            state_value += sigma[history + valid_move] * sub_state_value
+        for valid_move in state.next_valid_move():
+            child_state = state.copy()
+            child_state.update_history(valid_move)
+            sub_state_value = traverse_mccfr(child_state, opponent_dice, global_dict)[0]
+            global_dict[str(child_state)][2] = sub_state_value
+            state_value += global_dict[str(child_state)][1] * sub_state_value
 
-        for valid_move in _next_valid_move(history):
-            R[history + valid_move] += (S[history + valid_move] - state_value)
+        for valid_move in state.next_valid_move():
+            sub_state = str(state)+str(valid_move[0])+str(valid_move[1])
+            global_dict[sub_state][0] += (global_dict[sub_state][2] - state_value)
 
-        return state_value
+        return state_value, global_dict
     else:
-        calculate_strategy(history)
+        # sample the opponent's action
+        action = sample_opponent_action(state.copy(), opponent_dice)
+        child_state = state.copy()
+        child_state.update_history(action)
+        return traverse_mccfr(child_state, opponent_dice, global_dict)
 
-        # sample actions
-        action = _sample_action(history)
-        return traverse_mccfr(history + action, P)
 
-
-def traverse_mccfr_p(history: str, P: int) -> float:
+def traverse_mccfr_p(state: State, opponent_dice: int, global_dict: dict) -> float:
     """
-    :param history: history of the game
-    :param P: player number
+    :param history: state of the game
+    :param opponent_dice: opponent's dice number
+    :param global_dict: global dictionary for storing regret, strategy, state and explore values
 
     MCCFR with pruning for very negative regrets
     Returns utility value for terminal node, or expected value for non-terminal node
     """
-    global sigma, R, S, explored
 
-    if history.endswith('c'):
-        return _utility(history, P)  # TODO: do i need to pass P?
-    elif _is_chance(history):  # TODO: what nodes are chance nodes?
-        # sample an action from the chance probabilities
-        action = _chance_action(history)
-        return traverse_mccfr_p(history + action, P)
-    elif _player_of_current_turn(history) == P:
+    if state.is_terminal():  # terminal node
+        return state.utility(opponent_dice), global_dict
+    elif state.dice == 0:  # dice have not been rolled, chance node
+        state = init_state(state)
+        return traverse_mccfr_p(state, opponent_dice, global_dict)
+    elif state.player_of_current_turn() == 1:  # agent's turn
         state_value = 0
-        calculate_strategy(history)
+        global_dict = calculate_strategy(state, global_dict)
 
-        for valid_move in _next_valid_move(history):
-            if R[history + valid_move] > REGRET_PRUNE_THRESHOLD:
-                sub_state_value = traverse_mccfr_p(history + valid_move, P)
-                explored[history + valid_move] = True
-                S[history + valid_move] = sub_state_value
-                state_value += sigma[history + valid_move] * sub_state_value
+        for valid_move in state.next_valid_move():
+            child_state = state.copy()
+            child_state.update_history(valid_move)
+            if global_dict[str(child_state)][0] > REGRET_PRUNE_THRESHOLD:
+                sub_state_value = traverse_mccfr_p(child_state, opponent_dice, global_dict)[0]
+                global_dict[str(child_state)][3] = True
+                global_dict[str(child_state)][2] = sub_state_value
+                state_value += global_dict[str(child_state)][1] * sub_state_value
             else:
-                explored[history + valid_move] = False
-        for valid_move in _next_valid_move(history):
-            if explored[history + valid_move]:
-                R[history +
-                    valid_move] += (S[history + valid_move] - state_value)
+                global_dict[str(child_state)][3] = False
 
-        return state_value
+                # mark all the greater bids to be not explored
+                for greater_valid_move in child_state.next_valid_move():
+                    greater_child_state = child_state.copy()
+                    greater_child_state.update_history(greater_valid_move)
+                    global_dict[str(greater_child_state)][3] = False
+
+                break
+
+        for valid_move in state.next_valid_move():
+            sub_state = str(state)+str(valid_move[0])+str(valid_move[1])
+            if global_dict[sub_state][3]:
+                global_dict[sub_state][0] += (global_dict[sub_state][2] - state_value)
+
+        return state_value, global_dict
     else:
-        calculate_strategy(history)
-
-        # sample actions
-        action = _sample_action(history)
-        return traverse_mccfr_p(history + action, P)
+        # sample the opponent's action
+        action = sample_opponent_action(state.copy(), opponent_dice)
+        child_state = state.copy()
+        child_state.update_history(action)
+        return traverse_mccfr_p(child_state, opponent_dice, global_dict)
 
 
 def MCCFR_P(T: int, start_time: float) -> defaultdict:
@@ -307,36 +223,54 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
     """
 
     for t in range(1, T):
-        for P in [0, 1]:  # there are only two players
-            # if t % STRATEGY_INTERVAL == 0:
-            #     update_strategy('', P)
+        # random.seed(37 + t)
+        # np.random.seed(37 + t)
 
-            time_elasped = time.time() - start_time
+        time_elasped = time.time() - start_time
 
-            if time_elasped > PRUNE_THRESHOLD:
-                q = np.random.rand()
-                if q < 0.05:
-                    traverse_mccfr('', P)
-                else:
-                    traverse_mccfr_p('', P)
+        # init the state
+        state = init_state(State([]))
+
+        # load the dictionary from the json file
+        if os.path.exists(f'output/{str(state.dice)}.json'):
+            with open(f'output/{str(state.dice)}.json', 'r') as fp:
+                # print(f'reading existing dictionary of dice {state.dice}')
+                global_dict = json.load(fp)
+                global_dict = defaultdict(lambda: [0.0, 0.0, 0.0, False, 0.0], global_dict)
+
+            # update the strategy every 5000 iterations
+            if t % STRATEGY_INTERVAL == 0:
+                print(f'time elapsed: {time_elasped / 3600:.2f} hours')
+                print(f'updating strategy for dice {state.dice}')
+                global_dict = update_strategy(state, global_dict)
+        else:
+            global_dict = defaultdict(lambda: [0.0, 0.0, 0.0, False, 0.0])
+
+        if time_elasped > PRUNE_THRESHOLD:
+            q = np.random.rand()
+            if q < 0.05:
+                traverse_mccfr(state, init_player_dice(), global_dict)
             else:
-                traverse_mccfr('', P)
+                traverse_mccfr_p(state, init_player_dice(), global_dict)
+        else:
+            traverse_mccfr(state, init_player_dice(), global_dict)
 
-            if time_elasped < LCFR_TRESHOLD and time_elasped % DISCOUNT_INTERVAL == 0:
-                d = (t / DISCOUNT_INTERVAL) / (t / DISCOUNT_INTERVAL + 1)
+        if time_elasped < LCFR_TRESHOLD and (time_elasped + 1) % DISCOUNT_INTERVAL == 0:
+            d = (t / DISCOUNT_INTERVAL) / (t / DISCOUNT_INTERVAL + 1)
 
-                global R, phi
+            for k in global_dict:
+                global_dict[k][0] /= d  # discount the regret
+                global_dict[k][4] /= d  # discount the strategy
 
-                # TODO: probably need to improve efficiency here
-                for k in R:
-                    R[k] /= d
+        # save the dictionary to a json file
+        with open(f'output/{str(state.dice)}.json', 'w') as fp:
+            json.dump(global_dict, fp)
+            # print('save dictionary of dFice', state.dice, 'to json file')
 
-                # for k in phi:
-                #     phi[k] /= d
-
-    global sigma
-    return sigma  # may be unnecessary
+    # print time elapsed in hours
+    print(f'time elapsed: {time_elasped / 3600:.2f} hours')
+    return global_dict
 
 
 if __name__ == "__main__":
-    MCCFR_P(10**7, time.time())
+    MCCFR_P(1*10**6, time.time())

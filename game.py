@@ -1,7 +1,32 @@
 from player import Player
+from state import State
 import random
+import json
 
-random.seed(37)
+# random.seed(37)
+
+
+def init_player_dice() -> int:
+    """
+    Initialize the dice for the player
+    give the player five dices. each digit represents a dice from 1 to 6
+    e.g. 12345 means 1, 2, 3, 4, 5
+    """
+    return random.randint(1, 6) * 10000 + random.randint(1, 6) * 1000 + random.randint(1, 6) * 100 \
+        + random.randint(1, 6) * 10 + random.randint(1, 6)
+
+
+def init_state(state: State) -> State:
+    """
+    Initialize the state of the game
+    """
+    if state.dice == 0:
+        state.dice = init_player_dice()
+
+    if state.first_act is None:
+        state.first_act = random.choice([True, False])
+
+    return state
 
 
 class Game:
@@ -14,6 +39,70 @@ class Game:
         self.players = []
         self.total_dice = {val: 0 for val in range(1, 7)}
         self.wild_one = True
+        self.state = None  # agent's state
+        self.player_dice = None  # player's dice
+        self.strategy = None  # agent's strategy
+
+    def start_game(self):
+        """
+        init state for the agent and assign dice to the player
+        """
+        self.state = init_state(State([]))
+
+        # read the strategy from the file
+        with open(f"output/{str(self.state.dice)}.json", "r") as fp:
+            print(f'agent strategy {str(self.state.dice)} is loaded')
+            self.strategy = json.load(fp)
+
+        print("Game started!")
+        self.player_dice = init_player_dice()
+        print(f"Your dice is: {self.player_dice}")
+
+    def play(self):
+        """
+        Simulate the game. The agent and the player take turns to play the game.
+        Use prompt to get the player's input.
+        """
+
+        if self.state.first_act:
+            print("Agent goes first.")
+        else:
+            print("Player goes first.")
+        print('-' * 20)
+        while not self.state.is_terminal():
+            if self.state.player_of_current_turn():
+                # agent's turn
+                action_list = self.state.next_valid_move()
+                action = random.choice(action_list)
+                if action != (-1, -1):
+                    print(f"agent's action is: bid {action[0]} {action[1]}'s")
+                else:
+                    print("agent's action is: challenge!")
+                self.state.history.append(action)
+            else:
+                # player's turn, use prompt to get the player's input
+                valid_moves = self.state.next_valid_move()
+                action = input("Your action in the format of 'bid 2 3' or 'challenge': ")
+                if action == "challenge":
+                    action = (-1, -1)
+                else:
+                    action = tuple(map(int, action.split()[1:]))
+                while action not in valid_moves:
+                    print("Invalid action, please try again!")
+                    action = input("Your action in the format of 'bid 2 3' or 'challenge': ")
+                    if action == "challenge":
+                        action = (-1, -1)
+                    else:
+                        action = tuple(map(int, action.split()[1:]))
+                self.state.history.append(action)
+
+        # terminal node, determine the winner
+        print('-' * 20)
+        print(f"agent's dice is: {self.state.dice}")
+        if self.state.utility(self.player_dice) == 1:
+            print("You win!")
+        else:
+            print("You lose!")
 
     def add_player(self, player: Player):
         self.players.append(player)
@@ -62,85 +151,7 @@ class Game:
         self.refresh_ttl_dice()
 
 
-def pick_valid_move(node: str) -> str:
-    if node.endswith('c'):
-        return ''
-
-    bid = [str(i) for i in range(3, 10)]
-    value = [str(i) for i in range(1, 7)]
-
-    if len(node) == 10:
-        valid_move = [b + v for b in bid for v in value]
-
-    else:
-        last_bid = int(node[-2])
-        last_value = int(node[-1])
-
-        assert (last_bid <= 9 and last_value <= 6)
-
-        wild_one = '1' not in node[10:]
-
-        valid_move = []
-        # get valid moves with the same bid
-        if wild_one:
-            greater_values = [str(i) for i in range(last_value + 1, 7)] + ['1']
-        else:
-            greater_values = [str(i) for i in range(last_value + 1, 7)]
-
-        valid_move += [str(last_bid) + greater_val for greater_val in greater_values]
-
-        # get valid moves with greater bid
-        greater_bid = [str(i) for i in range(last_bid + 1, 10)]
-
-        if wild_one:
-            valid_move += [b + v for b in greater_bid for v in value]
-        else:
-            valid_move += [b + v for b in greater_bid for v in value[1:]]  # no 1's
-
-        valid_move += ['c']
-        # print(valid_move)
-    return random.choice(valid_move)
-
-
-def result(node: str) -> str:
-    assert (node.endswith('c') and len(node) >= 13)
-
-    bid = node[-3]
-    val = node[-2]
-
-    wild_one = '1' not in node[10:]
-
-    dice = {str(val): 0 for val in range(1, 7)}
-    for d in node[:10]:
-        dice[d] += 1
-
-    # wins if the bid is fake
-    if wild_one:
-        return int(bid) > dice[val] + dice['1']
-    else:
-        return int(bid) > dice[val]
-
-# if __name__ == "__main__":
-#     node = '123451234534c'
-#     valid_move = result(node)
-#     print(valid_move)
-
-#     d1 = Dice(pattern='33451')
-#     d2 = Dice(pattern='33451')
-#     p1 = Player(dice = d1, name = "p1")
-#     p2 = Player(dice = d2, name = "p2")
-#     game = Game()
-#     game.add_player(p1)
-#     game.add_player(p2)
-
-#     print(p1.dice)
-#     print(p2.dice)
-
-#     game.refresh_ttl_dice()
-
-#     bid = random.randint(0,9) * 10 + random.randint(1,6)
-#     print(f"the bid is {bid // 10} {bid % 10}'s")
-
-#     print(f"the number of dice in the game is: {game.total_dice}")
-
-#     print(f"the challenge result is: {game.challenge(bid)}")
+if __name__ == "__main__":
+    g = Game()
+    g.start_game()
+    g.play()
