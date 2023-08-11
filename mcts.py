@@ -7,7 +7,7 @@ import numpy as np
 import random
 import time
 
-random.seed(37)
+# random.seed(37)
 
 
 class MCTS_Trainer:
