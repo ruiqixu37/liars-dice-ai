@@ -5,7 +5,6 @@ from trie import Trie
 import time
 import numpy as np
 import os
-import random
 import pickle
 
 STRATEGY_INTERVAL = 1000
@@ -303,8 +302,9 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             traverse_mccfr(state, init_player_dice(), trie)
 
         if time_elasped + previous_cumulative_time < LCFR_TRESHOLD \
-              and (time_elasped + previous_cumulative_time + 1) % DISCOUNT_INTERVAL == 0:
-            d = ((t + previous_T) / DISCOUNT_INTERVAL) / (((t + previous_T) / DISCOUNT_INTERVAL) + 1)
+                and (time_elasped + previous_cumulative_time + 1) % DISCOUNT_INTERVAL == 0:
+            d = ((t + previous_T) / DISCOUNT_INTERVAL) / \
+                (((t + previous_T) / DISCOUNT_INTERVAL) + 1)
 
             for end_state in trie.all_end_state():
                 end_state['#'][0] /= d  # discount the regret
@@ -313,7 +313,7 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
         # Serialize and save the Trie object
         with open(f"output/trie_{str(state)}.pkl", "wb") as f:
             pickle.dump(trie, f)
-        
+
         # Serialize and save the time record
         with open("output/time.pkl", "wb") as f:
             pickle.dump({'cumulative_time': time_elasped + previous_cumulative_time,
@@ -326,4 +326,10 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
 
 
 if __name__ == "__main__":
-    MCCFR_P(1*10**3, time.time())
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--time", type=int, default=1*10**3)
+
+    args = parser.parse_args()
+
+    MCCFR_P(args.time, time.time())
