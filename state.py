@@ -26,7 +26,7 @@ class State:
         """
         Returns a list of valid moves for the current turn
 
-        To be memory efficient, a couple of rules are applied:
+        To be memory efficient, a couple of priors are applied:
         1. the first move can bet a quanity of 2 to 4 with any face
         2. a move can bet a quantity of up to 8
         3. any move's quantity can be at most 2 greater than the last move's quantity
@@ -73,10 +73,7 @@ class State:
         """
         assert self.dice != 0 and self.first_act is not None
 
-        if len(self.history) == 0:
-            return self.first_act
-
-        if self.first_act:  # agent goes first
+        if self.first_act:
             return len(self.history) % 2 == 0
         else:
             return len(self.history) % 2 == 1
@@ -113,7 +110,7 @@ class State:
         last_bid = self.history[-2]
         last_bid_quantity, last_bid_face = last_bid
 
-        total_bid_face = 0
+        total_face = 0
 
         # get the total number of last bid face in the game
         # including the opponent's dice
@@ -122,20 +119,20 @@ class State:
         # iterate through each digit and count the number of last bid face
         for digit in str(self.dice):
             if int(digit) == last_bid_face:
-                total_bid_face += 1
+                total_face += 1
             elif self.wild_one and int(digit) == 1:
-                total_bid_face += 1
+                total_face += 1
 
         for digit in str(opponent_dice):
             if int(digit) == last_bid_face:
-                total_bid_face += 1
+                total_face += 1
             elif self.wild_one and int(digit) == 1:
-                total_bid_face += 1
+                total_face += 1
 
         # determine who challenged based on self.first_act
         agent_challenge = self.player_of_current_turn()
 
-        if total_bid_face >= last_bid_quantity:  # challenge failed
+        if total_face >= last_bid_quantity:  # challenge failed
             return -1 * agent_challenge
         else:
             return 1 * agent_challenge
