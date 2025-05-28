@@ -179,7 +179,7 @@ def traverse_mccfr_p(state: State, opponent_dice: int, global_dict: dict) -> flo
     elif state.dice == 0:  # dice have not been rolled, chance node
         state = init_state(state)
         return traverse_mccfr_p(state, opponent_dice, global_dict)
-    elif state.player_of_current_turn() == 1:  # agent's turn
+    elif state.player_of_next_move() == 1:  # agent's turn
         state_value = 0
         global_dict = calculate_strategy(state, global_dict)
 
