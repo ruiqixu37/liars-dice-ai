@@ -66,9 +66,9 @@ class State:
 
         return valid_moves
 
-    def player_of_current_turn(self):
+    def player_of_next_move(self):
         """
-        Returns the player number of the current turn
+        Returns the player number of the next_move
         1 for agent, 0 for opponent
         """
         assert self.dice != 0 and self.first_act is not None
@@ -130,7 +130,12 @@ class State:
                 total_face += 1
 
         # determine who challenged based on self.first_act
-        agent_challenge = self.player_of_current_turn()
+        # flip player_of_next_move() because it returns the "next" player
+        # but we want the "current" player
+        if self.player_of_next_move() == 0:  # agent made the challenge
+            agent_challenge = 1
+        else:  # opponent made the challenge
+            agent_challenge = -1
 
         if total_face >= last_bid_quantity:  # challenge failed
             return -1 * agent_challenge
