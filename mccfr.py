@@ -259,8 +259,8 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             d = (t / DISCOUNT_INTERVAL) / (t / DISCOUNT_INTERVAL + 1)
 
             for k in global_dict:
-                global_dict[k][0] /= d  # discount the regret
-                global_dict[k][4] /= d  # discount the strategy
+                global_dict[k][0] *= d  # discount the regret
+                global_dict[k][4] *= d  # discount the strategy
 
         # save the dictionary to a json file
         with open(f'output/{str(state.dice)}.json', 'w') as fp:
