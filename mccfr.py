@@ -62,7 +62,7 @@ def update_strategy(state: State, global_dict: dict) -> dict:
 
     if state.is_terminal():
         return global_dict
-    elif state.player_of_current_turn() == 1:  # agent's turn
+    elif state.player_of_next_move() == 1:  # agent's turn
         global_dict = calculate_strategy(state, global_dict)
 
         # sample the action
@@ -99,7 +99,8 @@ def sample_opponent_action(state: State, opponent_dice: int) -> tuple:
     Returns the opponent's action
     """
     # replace the agent's dice with the opponent's dice
-    state.dice = opponent_dice
+    s = state.copy()
+    s.dice = opponent_dice
     valid_action_list = state.next_valid_move()
 
     # load the dictionary from the json file
@@ -139,7 +140,7 @@ def traverse_mccfr(state: State, opponent_dice: int, global_dict: dict) -> float
     elif state.dice == 0:  # dice have not been rolled, chance node
         state = init_state(state)
         return traverse_mccfr(state, opponent_dice, global_dict)
-    elif state.player_of_current_turn() == 1:  # agent's turn
+    elif state.player_of_next_move() == 1:  # agent's turn
         state_value = 0
         global_dict = calculate_strategy(state, global_dict)
 
@@ -195,9 +196,10 @@ def traverse_mccfr_p(state: State, opponent_dice: int, global_dict: dict) -> flo
 
                 # mark all the greater bids to be not explored
                 for greater_valid_move in child_state.next_valid_move():
-                    greater_child_state = child_state.copy()
-                    greater_child_state.update_history(greater_valid_move)
-                    global_dict[str(greater_child_state)][3] = False
+                    # greater_child_state = child_state.copy()
+                    # greater_child_state.update_history(greater_valid_move)
+                    greater_child_state = str(child_state)+str(greater_valid_move[0])+str(greater_valid_move[1])
+                    global_dict[greater_child_state][3] = False
 
                 break
 
@@ -273,4 +275,4 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
 
 
 if __name__ == "__main__":
-    MCCFR_P(1*10**6, time.time())
+    MCCFR_P(1*10**5, time.time())
