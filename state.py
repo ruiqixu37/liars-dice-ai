@@ -62,7 +62,8 @@ class State:
 
         valid_moves += [(bid, face) for bid in greater_bid for face in range(1, 7)]
 
-        valid_moves += [(-1, -1)]  # challenge
+        if len(self.history) != 0:
+            valid_moves += [(-1, -1)]  # challenge
 
         return valid_moves
 
