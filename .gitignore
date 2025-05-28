@@ -2,3 +2,6 @@ __pycache__/
 output/
 
 .vscode/
+.DS_Store
+webpage/
+```
