@@ -21,18 +21,19 @@ class Trie:
             curr = curr[w]
         curr["#"] = [0.0, strategy_p]
 
+    def _dfs_search(self, word: str, trie) -> any:
+        if not word:
+            return None if '#' not in trie else trie
+        if word[0] not in trie:
+            return None
+        return self._dfs_search(word[1:], trie[word[0]])
+
     def search(self, word: str) -> bool:
         """
         Returns the node in the trie if the string word is in the trie (i.e., was inserted before),
         and None otherwise.
         """
-        def __dfs(word, trie):
-            if not word:
-                return None if '#' not in trie else trie
-            if word[0] not in trie:
-                return None
-            return __dfs(word[1:], trie[word[0]])
-        return __dfs(word, self.trie)
+        return self._dfs_search(word, self.trie)
 
     def startsWith(self, prefix: str) -> bool:
         """
@@ -46,21 +47,22 @@ class Trie:
             self.curr = self.curr[w]
         return True
 
+    def _dfs_all_end(self, trie, path: str) -> list:
+        if not trie:
+            return []
+        if "#" in trie:
+            curr = [[path, trie]]
+            for key in trie:
+                if key != '#':
+                    curr += self._dfs_all_end(trie[key], path + key)
+            return curr
+        res = []
+        for key in trie:
+            res += self._dfs_all_end(trie[key], path + key)
+        return res
+
     def all_end_state(self) -> list:
         """
         Returns all the end states in the trie as well as the path to the end state.
         """
-        def __dfs(trie, path):
-            if not trie:
-                return []
-            if "#" in trie:
-                curr = [[path, trie]]
-                for key in trie:
-                    if key != '#':
-                        curr += __dfs(trie[key], path+key)
-                return curr
-            res = []
-            for key in trie:
-                res += __dfs(trie[key], path+key)
-            return res
-        return __dfs(self.trie, '')
+        return self._dfs_all_end(self.trie, '')
