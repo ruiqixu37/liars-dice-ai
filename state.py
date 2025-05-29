@@ -19,8 +19,9 @@ class State:
 
     def __str__(self) -> str:
         dice = str(self.dice)
+        first_act = '1' if self.first_act else '0'
         history = ''.join([str(bid[0])+str(bid[1]) for bid in self.history])
-        return f'{dice}{history}'
+        return f'{dice}{first_act}{history}'
 
     def next_valid_move(self):
         """
