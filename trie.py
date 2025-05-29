@@ -19,7 +19,7 @@ class Trie:
             if w not in curr:
                 curr[w] = {}
             curr = curr[w]
-        curr["#"] = [0.0, strategy_p]
+        curr["#"] = [0.0, strategy_p, 0.0]
 
     def _dfs_search(self, word: str, trie) -> any:
         if not word:
@@ -28,7 +28,7 @@ class Trie:
             return None
         return self._dfs_search(word[1:], trie[word[0]])
 
-    def search(self, word: str) -> bool:
+    def search(self, word: str) -> any:
         """
         Returns the node in the trie if the string word is in the trie (i.e., was inserted before),
         and None otherwise.

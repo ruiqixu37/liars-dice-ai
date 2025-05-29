@@ -5,13 +5,15 @@ from trie import Trie
 import time
 import numpy as np
 import os
+import random
 import pickle
 
-STRATEGY_INTERVAL = 1000
-PRUNE_THRESHOLD = 2 * 60  # 200 minutes
-LCFR_TRESHOLD = 400 * 60  # 400 minutes
-DISCOUNT_INTERVAL = 10 * 60  # 10 minutes
+STRATEGY_INTERVAL = 1000 # in iterations
+PRUNE_THRESHOLD = 2 * 60  # in seconds
+LCFR_TRESHOLD = 400 * 60  # in seconds
+DISCOUNT_INTERVAL = 10 * 60  # in seconds
 REGRET_PRUNE_THRESHOLD = -15
+SAVE_INTERVAL = 100 # in iterations
 
 # random.seed(37)
 # # R for regret, S for state
@@ -39,27 +41,25 @@ def calculate_strategy(state: State, trie: Trie) -> dict:
     regret_sum = 0
     valid_action_list = state.next_valid_move()
     for action in valid_action_list:
-        child = state.copy()
-        child.update_history(action)
+        child = str(state) + str(action[0]) + str(action[1])
         # find in the trie
-        child_node = trie.search(str(child))
+        child_node = trie.search(child)
         if child_node is not None:
             regret_sum += max(child_node['#'][0], 0)
 
     for action in valid_action_list:
-        child = state.copy()
-        child.update_history(action)
-        child_node = trie.search(str(child))
+        child = str(state) + str(action[0]) + str(action[1])
+        child_node = trie.search(child)
         if regret_sum > 0:
             if child_node is not None:
                 child_node['#'][1] = max(child_node['#'][0], 0) / regret_sum
             else:
-                trie.insert(str(child), strategy_p=0)
+                trie.insert(child, strategy_p=0)
         else:
             if child_node is not None:
                 child_node['#'][1] = 1 / len(valid_action_list)
             else:
-                trie.insert(str(child), strategy_p=1/len(valid_action_list))
+                trie.insert(child, strategy_p=1/len(valid_action_list))
     return trie
 
 
@@ -100,11 +100,11 @@ def update_strategy(state: State, trie: Trie) -> Trie:
         child_state.update_history(action)
         child_state_node = trie.search(str(child_state))
         if child_state_node is not None:
-            child_state_node['#'][4] += 1
+            child_state_node['#'][2] += 1 # TODO
         else:
-            trie.insert(str(child_state), strategy_p=1/len(state.next_valid_move()))
+            trie.insert(str(child_state), strategy_p=1/len(valid_action_list))
             child_state_node = trie.search(str(child_state))
-            child_state_node['#'][4] += 1
+            child_state_node['#'][2] += 1
         trie = update_strategy(child_state, trie)
     else:  # opponent's turn
         # iterate through all the valid actions
@@ -163,9 +163,9 @@ def traverse_mccfr(state: State, opponent_dice: int, trie: Trie) -> float:
     """
     :param history: state of the game
     :param opponent_dice: opponent's dice number
-    :param trie: global trie for storing regret, strategy, state and explore values
+    :param trie: global trie for storing regret value, strategy probability, and action counter
 
-    Returns 1. utility value for terminal node, or expected value for non-terminal node
+    Returns 1. utility value for terminal node, or expected state value for non-terminal node
             2. global trie
     """
 
@@ -213,10 +213,10 @@ def traverse_mccfr_p(state: State, opponent_dice: int, trie: Trie) -> float:
     """
     :param history: state of the game
     :param opponent_dice: opponent's dice number
-    :param trie: global trie for storing regret, strategy, state and explore values
+    :param trie: global trie for storing regret value, strategy probability, and action counter
 
     MCCFR with pruning for very negative regrets
-    Returns utility value for terminal node, or expected value for non-terminal node
+    Returns utility value for terminal node, or expected state value for non-terminal node
     """
 
     if state.is_terminal():  # terminal node
@@ -275,8 +275,8 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
         previous_T = 0
 
     for t in range(1, T):
-        # random.seed(37 + t)
-        # np.random.seed(37 + t)
+        random.seed(37 + t)
+        np.random.seed(37 + t)
         time_elasped = time.time() - start_time
         if t % 100 == 0:
             print(f'iteration {t} time elapsed: {time_elasped / 3600:.2f} hours')
@@ -285,13 +285,14 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
         if os.path.exists(f"output/trie_{str(state.dice)}.pkl"):
             with open(f"output/trie_{str(state.dice)}.pkl", "rb") as f:
                 trie = pickle.load(f)
-            # update the strategy every 5000 iterations
-            # if t % STRATEGY_INTERVAL == 0:
-            #     print(f'time elapsed: {time_elasped / 3600:.2f} hours')
-            #     print(f'updating strategy for dice {state.dice}')
-            #     trie = update_strategy(state, trie)
         else:
             trie = Trie()
+            
+        # update the strategy every 5000 iterations
+        if (t+1) % STRATEGY_INTERVAL == 0:
+            print(f'time elapsed: {time_elasped / 3600:.2f} hours')
+            print(f'updating strategy for dice {state.dice}')
+            trie = update_strategy(state, trie)
 
         if time_elasped + previous_cumulative_time > PRUNE_THRESHOLD:
             q = np.random.rand()
@@ -307,18 +308,23 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             d = ((t + previous_T) / DISCOUNT_INTERVAL) / \
                 (((t + previous_T) / DISCOUNT_INTERVAL) + 1)
 
-            for end_state in trie.all_end_state():
+            for end_state in trie.all_end_state(): #TODO: Check if this actually updates the trie object
                 end_state['#'][0] *= d  # discount the regret
-                end_state['#'][4] *= d  # discount the strategy
+                end_state['#'][2] *= d  # discount the action counter
 
-        # Serialize and save the Trie object
-        with open(f"output/trie_{str(state)}.pkl", "wb") as f:
-            pickle.dump(trie, f)
 
-        # Serialize and save the time record
-        with open("output/time.pkl", "wb") as f:
-            pickle.dump({'cumulative_time': time_elasped + previous_cumulative_time,
-                         'T': t + previous_T}, f)
+        if (t+1) % SAVE_INTERVAL == 0:
+            if not os.path.exists("output"):
+                os.makedirs("output")
+
+            # Serialize and save the Trie object
+            with open(f"output/trie_{str(state)}.pkl", "wb") as f:
+                pickle.dump(trie, f)
+
+            # Serialize and save the time record
+            with open("output/time.pkl", "wb") as f:
+                pickle.dump({'cumulative_time': time_elasped + previous_cumulative_time,
+                            'T': t + previous_T}, f)
 
     print(f'training episode of {T} iterations ends. time elapsed: {time_elasped / 3600:.2f} hours')
     print(f'total number of iterations: {T + previous_T}')
