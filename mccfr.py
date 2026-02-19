@@ -32,6 +32,14 @@ SAVE_INTERVAL = 100 # in iterations
 
 global_trie = Trie()
 
+# Cache for opponent tries to avoid repeated disk I/O
+_opponent_cache = {}
+
+
+def clear_opponent_cache():
+    """Clear the opponent trie cache (useful for testing)."""
+    _opponent_cache.clear()
+
 
 def get_average_strategy(state: State, trie: Trie) -> dict:
     """
@@ -166,10 +174,16 @@ def sample_opponent_action(state: State, opponent_dice: int) -> tuple:
     s.dice = opponent_dice
     valid_action_list = s.next_valid_move()
 
-    # load the dictionary from the json file
-    if os.path.exists(f"output/trie_{str(s.dice)}.pkl"):
-        with open(f"output/trie_{str(s.dice)}.pkl", "rb") as f:
-            oppoent_trie = pickle.load(f)
+    # load the opponent trie from cache or disk
+    dice_key = s.dice
+    if dice_key not in _opponent_cache:
+        path = f"output/trie_{str(s.dice)}.pkl"
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                _opponent_cache[dice_key] = pickle.load(f)
+
+    if dice_key in _opponent_cache:
+        oppoent_trie = _opponent_cache[dice_key]
         oppoent_trie = calculate_strategy(s, oppoent_trie)
 
         # get the action probabilities and sample actions
@@ -308,6 +322,9 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
         previous_cumulative_time = 0
         previous_T = 0
 
+    # In-memory cache for agent tries — only load from disk on first encounter
+    agent_tries = {}
+
     for t in range(1, T):
         random.seed(37 + t)
         np.random.seed(37 + t)
@@ -316,11 +333,15 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             print(f'iteration {t} time elapsed: {time_elasped / 3600:.2f} hours')
         # init the state
         state = init_state(State([]))
-        if os.path.exists(f"output/trie_{str(state.dice)}.pkl"):
-            with open(f"output/trie_{str(state.dice)}.pkl", "rb") as f:
-                trie = pickle.load(f)
-        else:
-            trie = Trie()
+        dice_key = state.dice
+        if dice_key not in agent_tries:
+            path = f"output/trie_{str(state.dice)}.pkl"
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    agent_tries[dice_key] = pickle.load(f)
+            else:
+                agent_tries[dice_key] = Trie()
+        trie = agent_tries[dice_key]
             
         # update the strategy every 5000 iterations
         if (t+1) % STRATEGY_INTERVAL == 0:

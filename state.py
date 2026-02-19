@@ -2,6 +2,9 @@ from copy import copy
 
 
 class State:
+    __slots__ = ('dice', 'wild_one', 'children', 'first_act', 'history',
+                 '_str_cache', '_valid_moves_cache')
+
     def __init__(self, state, first_act=None):
         """
         state: tuple, (dice, (quantity, face), (quantity, face), ..., (-1, -1)))
@@ -16,6 +19,8 @@ class State:
         self.children = []
         self.first_act = first_act
         self.history = list(state[1:])
+        self._str_cache = None
+        self._valid_moves_cache = None
         # Check if any bid in history has face=1, which disables wild_one
         for bid in self.history:
             if bid[1] == 1:
@@ -23,10 +28,12 @@ class State:
                 break
 
     def __str__(self) -> str:
-        dice = str(self.dice)
-        first_act = '1' if self.first_act else '0'
-        history = ''.join([str(bid[0])+str(bid[1]) for bid in self.history])
-        return f'{dice}{first_act}{history}'
+        if self._str_cache is None:
+            dice = str(self.dice)
+            first_act = '1' if self.first_act else '0'
+            history = ''.join([str(bid[0])+str(bid[1]) for bid in self.history])
+            self._str_cache = f'{dice}{first_act}{history}'
+        return self._str_cache
 
     def next_valid_move(self):
         """
@@ -40,13 +47,18 @@ class State:
         Then, per the rules of the game, the moves should:
         1. be greater than the last move in quantity, or greater in face if the quantity is the same
         """
+        if self._valid_moves_cache is not None:
+            return self._valid_moves_cache
+
         assert (self.dice != 0)
 
         if len(self.history) == 0:
-            return [(i, j) for i in range(2, 5) for j in range(1, 7)]
+            self._valid_moves_cache = [(i, j) for i in range(2, 5) for j in range(1, 7)]
+            return self._valid_moves_cache
 
         if self.history[-1] == (-1, -1):
-            return []
+            self._valid_moves_cache = []
+            return self._valid_moves_cache
 
         last_quantity, last_face = self.history[-1]
 
@@ -71,7 +83,8 @@ class State:
         if len(self.history) != 0:
             valid_moves += [(-1, -1)]  # challenge
 
-        return valid_moves
+        self._valid_moves_cache = valid_moves
+        return self._valid_moves_cache
 
     def player_of_next_move(self):
         """
@@ -104,6 +117,9 @@ class State:
             self.wild_one = False
 
         self.history.append(move)
+        # Invalidate caches
+        self._str_cache = None
+        self._valid_moves_cache = None
 
     def utility(self, opponent_dice):
         """
@@ -119,21 +135,23 @@ class State:
 
         total_face = 0
 
-        # get the total number of last bid face in the game
-        # including the opponent's dice
-        # dice is a 5-digit number, each digit represents a dice
-        # e.g. 12345 means 1, 2, 3, 4, 5
-        # iterate through each digit and count the number of last bid face
-        for digit in str(self.dice):
-            if int(digit) == last_bid_face:
+        # Count matching dice using arithmetic instead of str conversion
+        d = self.dice
+        while d > 0:
+            digit = d % 10
+            d //= 10
+            if digit == last_bid_face:
                 total_face += 1
-            elif self.wild_one and int(digit) == 1:
+            elif self.wild_one and digit == 1:
                 total_face += 1
 
-        for digit in str(opponent_dice):
-            if int(digit) == last_bid_face:
+        d = opponent_dice
+        while d > 0:
+            digit = d % 10
+            d //= 10
+            if digit == last_bid_face:
                 total_face += 1
-            elif self.wild_one and int(digit) == 1:
+            elif self.wild_one and digit == 1:
                 total_face += 1
 
         # determine who challenged based on self.first_act
