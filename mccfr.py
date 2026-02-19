@@ -33,6 +33,41 @@ SAVE_INTERVAL = 100 # in iterations
 global_trie = Trie()
 
 
+def get_average_strategy(state: State, trie: Trie) -> dict:
+    """
+    :param state: state of the game
+    :param trie: global trie storing regret, strategy probability, and action counter
+
+    Computes the average strategy from cumulative action counts (index [2]).
+    In CFR, the average strategy converges to Nash equilibrium.
+
+    Returns a dict mapping each valid action to its average strategy probability.
+    """
+    valid_action_list = state.next_valid_move()
+    count_sum = 0.0
+    counts = {}
+
+    for action in valid_action_list:
+        child = str(state) + str(action[0]) + str(action[1])
+        child_node = trie.search(child)
+        if child_node is not None:
+            counts[action] = child_node['#'][2]
+            count_sum += child_node['#'][2]
+        else:
+            counts[action] = 0.0
+
+    result = {}
+    if count_sum > 0:
+        for action in valid_action_list:
+            result[action] = counts[action] / count_sum
+    else:
+        uniform = 1.0 / len(valid_action_list)
+        for action in valid_action_list:
+            result[action] = uniform
+
+    return result
+
+
 def calculate_strategy(state: State, trie: Trie) -> dict:
     """
     :param state: state of the game
