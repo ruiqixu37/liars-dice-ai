@@ -1,16 +1,20 @@
-from game import Game, init_player_dice
+from game import Game, init_player_dice, format_dice, format_action, \
+    count_matching_dice, parse_player_action, load_trie
 
 
 def test_game_initialization():
     """Test that game is initialized correctly"""
     game = Game()
-    assert game.num_players == 2
-    assert len(game.players) == 0
-    assert game.total_dice == {val: 0 for val in range(1, 7)}
-    assert game.wild_one is True
     assert game.state is None
     assert game.player_dice is None
-    assert game.strategy is None
+    assert game.agent_trie is None
+    assert game.hints is False
+
+
+def test_game_initialization_with_hints():
+    """Test that game can be initialized with hints enabled"""
+    game = Game(hints=True)
+    assert game.hints is True
 
 
 def test_init_player_dice():
@@ -22,34 +26,40 @@ def test_init_player_dice():
     assert all(1 <= d <= 6 for d in dice_values)
 
 
-def test_game_challenge():
-    """Test the challenge functionality"""
-    game = Game()
-    # Test with a specific configuration
-    game.total_dice = {1: 2, 2: 1, 3: 1, 4: 0, 5: 0, 6: 1}
-
-    # Test a valid challenge (bid is too high)
-    assert game.challenge(41)  # Bidding 4 ones when there are only 2
-
-    # Test an invalid challenge (bid is correct)
-    assert not game.challenge(21)  # Bidding 2 ones when there are 2
+def test_format_dice():
+    """Test dice formatting"""
+    assert format_dice(12345) == [1, 2, 3, 4, 5]
+    assert format_dice(66666) == [6, 6, 6, 6, 6]
+    assert format_dice(11111) == [1, 1, 1, 1, 1]
 
 
-def test_game_restart():
-    """Test game restart functionality"""
-    game = Game()
-    # Add a player
-    from player import Player
-    from dice import Dice
-    player = Player(Dice())
-    game.add_player(player)
+def test_format_action():
+    """Test action formatting"""
+    assert format_action((3, 4)) == "bid 3 4"
+    assert format_action((-1, -1)) == "challenge"
 
-    # Store initial dice values
-    initial_dice = player.dice.dice.copy()
 
-    # Restart the game
-    game.restart()
+def test_count_matching_dice():
+    """Test dice counting with and without wild ones"""
+    # face=3, no wilds
+    assert count_matching_dice(33333, 33333, 3, False) == 10
+    # face=3, with wilds (1s count)
+    assert count_matching_dice(11133, 11133, 3, True) == 10
+    # face=1, wilds active but face is 1 so no extra
+    assert count_matching_dice(11133, 11133, 1, True) == 6
 
-    # Check that dice were rolled
-    assert player.dice.dice != initial_dice
-    assert game.wild_one is True
+
+def test_parse_player_action():
+    """Test parsing player input"""
+    assert parse_player_action("bid 3 4") == (3, 4)
+    assert parse_player_action("challenge") == (-1, -1)
+    assert parse_player_action("CHALLENGE") == (-1, -1)
+    assert parse_player_action("BID 3 4") == (3, 4)
+    assert parse_player_action("garbage") is None
+    assert parse_player_action("bid abc") is None
+    assert parse_player_action("") is None
+
+
+def test_load_trie_missing():
+    """Test that loading a nonexistent trie returns None"""
+    assert load_trie(99999) is None

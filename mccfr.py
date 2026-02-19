@@ -9,7 +9,7 @@ import random
 import pickle
 
 STRATEGY_INTERVAL = 1000 # in iterations
-PRUNE_THRESHOLD = 2 * 60  # in seconds
+PRUNE_THRESHOLD = 30 * 60  # in seconds
 LCFR_TRESHOLD = 400 * 60  # in seconds
 DISCOUNT_INTERVAL = 10 * 60  # in seconds
 DISCOUNT_ITERATION_INTERVAL = 100  # in iterations
@@ -325,12 +325,27 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
     # In-memory cache for agent tries — only load from disk on first encounter
     agent_tries = {}
 
+    total_cumulative_time = previous_cumulative_time
+    pruning_active = total_cumulative_time > PRUNE_THRESHOLD
+    lcfr_active = total_cumulative_time < LCFR_TRESHOLD
+    last_report_time = 0.0
+    iter_times = []  # track recent iteration durations for speed estimate
+
+    print(f"{'='*60}")
+    print(f"  MCCFR Training — {T-1} iterations")
+    if previous_T > 0:
+        print(f"  Resuming from iteration {previous_T} ({previous_cumulative_time/3600:.2f}h)")
+    print(f"  Pruning threshold: {PRUNE_THRESHOLD/60:.0f}min | LCFR threshold: {LCFR_TRESHOLD/60:.0f}min")
+    print(f"  Pruning: {'ON' if pruning_active else 'OFF'} | LCFR discounting: {'ON' if lcfr_active else 'OFF'}")
+    print(f"{'='*60}")
+
     for t in range(1, T):
+        iter_start = time.time()
         random.seed(37 + t)
         np.random.seed(37 + t)
         time_elasped = time.time() - start_time
-        if t % 100 == 0:
-            print(f'iteration {t} time elapsed: {time_elasped / 3600:.2f} hours')
+        total_cumulative_time = time_elasped + previous_cumulative_time
+
         # init the state
         state = init_state(State([]))
         dice_key = state.dice
@@ -342,14 +357,12 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             else:
                 agent_tries[dice_key] = Trie()
         trie = agent_tries[dice_key]
-            
-        # update the strategy every 5000 iterations
+
+        # update the strategy
         if (t+1) % STRATEGY_INTERVAL == 0:
-            print(f'time elapsed: {time_elasped / 3600:.2f} hours')
-            print(f'updating strategy for dice {state.dice}')
             trie = update_strategy(state, trie)
 
-        if time_elasped + previous_cumulative_time > PRUNE_THRESHOLD:
+        if total_cumulative_time > PRUNE_THRESHOLD:
             q = np.random.rand()
             if q < 0.05:
                 traverse_mccfr(state, init_player_dice(), trie)
@@ -358,7 +371,7 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
         else:
             traverse_mccfr(state, init_player_dice(), trie)
 
-        if time_elasped + previous_cumulative_time < LCFR_TRESHOLD \
+        if total_cumulative_time < LCFR_TRESHOLD \
                 and t % DISCOUNT_ITERATION_INTERVAL == 0:
             d = (t / DISCOUNT_ITERATION_INTERVAL) / \
                 ((t / DISCOUNT_ITERATION_INTERVAL) + 1)
@@ -367,6 +380,36 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
                 end_state['#'][0] *= d  # discount the regret
                 end_state['#'][2] *= d  # discount the action counter
 
+        # Track iteration speed
+        iter_dur = time.time() - iter_start
+        iter_times.append(iter_dur)
+        if len(iter_times) > 100:
+            iter_times.pop(0)
+
+        # Progress report every 100 iterations
+        if t % 100 == 0:
+            pct = t / (T - 1) * 100
+            avg_speed = len(iter_times) / sum(iter_times) if iter_times else 0
+            remaining = (T - 1 - t) / avg_speed if avg_speed > 0 else 0
+
+            # Check phase transitions
+            was_pruning = pruning_active
+            was_lcfr = lcfr_active
+            pruning_active = total_cumulative_time > PRUNE_THRESHOLD
+            lcfr_active = total_cumulative_time < LCFR_TRESHOLD
+
+            trie_nodes = len(trie.data)
+            print(f"  [{pct:5.1f}%] iter {t + previous_T:>7d} | "
+                  f"{time_elasped/60:6.1f}min | "
+                  f"{avg_speed:.1f} it/s | "
+                  f"ETA {remaining/60:.1f}min | "
+                  f"dice seen: {len(agent_tries)} | "
+                  f"trie nodes: {trie_nodes:,}")
+
+            if pruning_active and not was_pruning:
+                print(f"  >>> Pruning activated at {total_cumulative_time/60:.1f}min")
+            if not lcfr_active and was_lcfr:
+                print(f"  >>> LCFR discounting ended at {total_cumulative_time/60:.1f}min")
 
         if (t+1) % SAVE_INTERVAL == 0:
             if not os.path.exists("output"):
@@ -378,12 +421,22 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
 
             # Serialize and save the time record
             with open("output/time.pkl", "wb") as f:
-                pickle.dump({'cumulative_time': time_elasped + previous_cumulative_time,
+                pickle.dump({'cumulative_time': total_cumulative_time,
                             'T': t + previous_T}, f)
 
-    print(f'training episode of {T} iterations ends. time elapsed: {time_elasped / 3600:.2f} hours')
-    print(f'total number of iterations: {T + previous_T}')
-    print(f'total time elapsed: {(time_elasped + previous_cumulative_time) / 3600:.2f} hours')
+        # Strategy update report
+        if (t+1) % STRATEGY_INTERVAL == 0:
+            print(f"  --- Strategy updated for dice {state.dice} "
+                  f"(trie nodes: {len(trie.data):,})")
+
+    print(f"{'='*60}")
+    print(f"  Training complete: {T-1} iterations in {time_elasped/3600:.2f}h")
+    print(f"  Total iterations (all sessions): {T - 1 + previous_T}")
+    print(f"  Total time (all sessions): {total_cumulative_time/3600:.2f}h")
+    print(f"  Unique dice trained: {len(agent_tries)}")
+    total_nodes = sum(len(t.data) for t in agent_tries.values())
+    print(f"  Total trie nodes across all dice: {total_nodes:,}")
+    print(f"{'='*60}")
     return trie
 
 
