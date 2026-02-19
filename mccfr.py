@@ -12,6 +12,7 @@ STRATEGY_INTERVAL = 1000 # in iterations
 PRUNE_THRESHOLD = 2 * 60  # in seconds
 LCFR_TRESHOLD = 400 * 60  # in seconds
 DISCOUNT_INTERVAL = 10 * 60  # in seconds
+DISCOUNT_ITERATION_INTERVAL = 100  # in iterations
 REGRET_PRUNE_THRESHOLD = -15
 SAVE_INTERVAL = 100 # in iterations
 
@@ -128,20 +129,18 @@ def sample_opponent_action(state: State, opponent_dice: int) -> tuple:
     # replace the agent's dice with the opponent's dice
     s = state.copy()
     s.dice = opponent_dice
-    valid_action_list = state.next_valid_move()
+    valid_action_list = s.next_valid_move()
 
     # load the dictionary from the json file
-    if os.path.exists(f"output/trie_{str(state.dice)}.pkl"):
-        # oppoent_trie = defaultdict(lambda: [0.0, 0.0, 0.0, False], oppoent_trie)
-        with open(f"output/trie_{str(state.dice)}.pkl", "rb") as f:
-            # print(f'reading existing trie of dice {state.dice}')
+    if os.path.exists(f"output/trie_{str(s.dice)}.pkl"):
+        with open(f"output/trie_{str(s.dice)}.pkl", "rb") as f:
             oppoent_trie = pickle.load(f)
-        oppoent_trie = calculate_strategy(state, oppoent_trie)
+        oppoent_trie = calculate_strategy(s, oppoent_trie)
 
         # get the action probabilities and sample actions
         action_probablities = np.array([])
         for valid_move in valid_action_list:
-            sub_state = str(state)+str(valid_move[0])+str(valid_move[1])
+            sub_state = str(s)+str(valid_move[0])+str(valid_move[1])
             sub_state_node = oppoent_trie.search(sub_state)
             if sub_state_node is not None:
                 action_probablities = np.append(action_probablities, sub_state_node['#'][1])
@@ -304,11 +303,11 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             traverse_mccfr(state, init_player_dice(), trie)
 
         if time_elasped + previous_cumulative_time < LCFR_TRESHOLD \
-                and (time_elasped + previous_cumulative_time + 1) % DISCOUNT_INTERVAL == 0:
-            d = ((t + previous_T) / DISCOUNT_INTERVAL) / \
-                (((t + previous_T) / DISCOUNT_INTERVAL) + 1)
+                and t % DISCOUNT_ITERATION_INTERVAL == 0:
+            d = (t / DISCOUNT_ITERATION_INTERVAL) / \
+                ((t / DISCOUNT_ITERATION_INTERVAL) + 1)
 
-            for end_state in trie.all_end_state(): #TODO: Check if this actually updates the trie object
+            for path, end_state in trie.all_end_state():
                 end_state['#'][0] *= d  # discount the regret
                 end_state['#'][2] *= d  # discount the action counter
 
@@ -318,7 +317,7 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
                 os.makedirs("output")
 
             # Serialize and save the Trie object
-            with open(f"output/trie_{str(state)}.pkl", "wb") as f:
+            with open(f"output/trie_{str(state.dice)}.pkl", "wb") as f:
                 pickle.dump(trie, f)
 
             # Serialize and save the time record

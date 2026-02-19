@@ -16,6 +16,11 @@ class State:
         self.children = []
         self.first_act = first_act
         self.history = list(state[1:])
+        # Check if any bid in history has face=1, which disables wild_one
+        for bid in self.history:
+            if bid[1] == 1:
+                self.wild_one = False
+                break
 
     def __str__(self) -> str:
         dice = str(self.dice)
