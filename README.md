@@ -33,17 +33,23 @@ game.py      — CLI for playing against the trained AI
 ```bash
 conda create -n liarsdice python=3.11
 conda activate liarsdice
-pip install numpy pytest
+pip install numpy pytest pyyaml
 ```
 
 ## Training
 
 ```bash
-# Train for 10,000 iterations (default 1,000)
-python mccfr.py --time 10000
+# Train using config/mccfr.yaml (default iterations is set in config)
+python mccfr.py
+
+# Optionally point to a custom config file
+python mccfr.py --config path/to/mccfr.yaml
+
+# Optionally override config values from CLI
+python mccfr.py --iterations 10000 --prune-threshold 5400 --save-interval 50
 ```
 
-Training prints progress every 100 iterations — iteration speed, ETA, unique dice seen, trie size, and phase transitions (pruning activation, LCFR end). Models are saved to `output/` every 100 iterations and training can be resumed by running the command again.
+Training prints progress every 100 iterations — iteration speed, ETA, unique dice seen, trie size, and phase transitions (pruning activation, LCFR end). Models are saved to `output/` every `save_interval` iterations (default `5000`) and training can be resumed by running the command again.
 
 ## Playing
 

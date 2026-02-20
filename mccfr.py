@@ -7,14 +7,76 @@ import numpy as np
 import os
 import random
 import pickle
+import argparse
+import yaml
 
-STRATEGY_INTERVAL = 1000 # in iterations
-PRUNE_THRESHOLD = 30 * 60  # in seconds
-LCFR_TRESHOLD = 400 * 60  # in seconds
-DISCOUNT_INTERVAL = 10 * 60  # in seconds
-DISCOUNT_ITERATION_INTERVAL = 100  # in iterations
-REGRET_PRUNE_THRESHOLD = -15
-SAVE_INTERVAL = 100 # in iterations
+DEFAULT_TRAINING_CONFIG = {
+    "iterations": 1 * 10**6,
+    "strategy_interval": 1000,
+    "prune_threshold": 120 * 60,
+    "lcfr_threshold": 1200 * 60,
+    "discount_interval": 10 * 60,
+    "discount_iteration_interval": 100,
+    "regret_prune_threshold": -15,
+    "save_interval": 5000,
+}
+
+STRATEGY_INTERVAL = DEFAULT_TRAINING_CONFIG["strategy_interval"]  # in iterations
+PRUNE_THRESHOLD = DEFAULT_TRAINING_CONFIG["prune_threshold"]  # in seconds
+LCFR_TRESHOLD = DEFAULT_TRAINING_CONFIG["lcfr_threshold"]  # in seconds
+DISCOUNT_INTERVAL = DEFAULT_TRAINING_CONFIG["discount_interval"]  # in seconds
+DISCOUNT_ITERATION_INTERVAL = DEFAULT_TRAINING_CONFIG["discount_iteration_interval"]  # in iterations
+REGRET_PRUNE_THRESHOLD = DEFAULT_TRAINING_CONFIG["regret_prune_threshold"]
+SAVE_INTERVAL = DEFAULT_TRAINING_CONFIG["save_interval"]  # in iterations
+
+
+def load_training_config(config_path: str) -> dict:
+    """Load MCCFR training parameters from YAML and merge with defaults."""
+    config = DEFAULT_TRAINING_CONFIG.copy()
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Config file must contain a top-level mapping: {config_path}")
+        for key in config:
+            if key in loaded:
+                config[key] = loaded[key]
+    return config
+
+
+def apply_training_config(config: dict) -> None:
+    """Apply config values to module-level constants used by training code."""
+    global STRATEGY_INTERVAL
+    global PRUNE_THRESHOLD
+    global LCFR_TRESHOLD
+    global DISCOUNT_INTERVAL
+    global DISCOUNT_ITERATION_INTERVAL
+    global REGRET_PRUNE_THRESHOLD
+    global SAVE_INTERVAL
+
+    STRATEGY_INTERVAL = int(config["strategy_interval"])
+    PRUNE_THRESHOLD = int(config["prune_threshold"])
+    LCFR_TRESHOLD = int(config["lcfr_threshold"])
+    DISCOUNT_INTERVAL = int(config["discount_interval"])
+    DISCOUNT_ITERATION_INTERVAL = int(config["discount_iteration_interval"])
+    REGRET_PRUNE_THRESHOLD = float(config["regret_prune_threshold"])
+    SAVE_INTERVAL = int(config["save_interval"])
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="config/mccfr.yaml")
+    parser.add_argument("--iterations", type=int, default=None)
+
+    # Optional per-parameter CLI overrides (take precedence over YAML).
+    parser.add_argument("--strategy-interval", type=int, default=None)
+    parser.add_argument("--prune-threshold", type=int, default=None)
+    parser.add_argument("--lcfr-threshold", type=int, default=None)
+    parser.add_argument("--discount-interval", type=int, default=None)
+    parser.add_argument("--discount-iteration-interval", type=int, default=None)
+    parser.add_argument("--regret-prune-threshold", type=float, default=None)
+    parser.add_argument("--save-interval", type=int, default=None)
+    return parser.parse_args()
 
 # random.seed(37)
 # # R for regret, S for state
@@ -441,10 +503,22 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
 
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--time", type=int, default=1*10**3)
+    args = parse_args()
+    config = load_training_config(args.config)
 
-    args = parser.parse_args()
+    cli_overrides = {
+        "iterations": args.iterations,
+        "strategy_interval": args.strategy_interval,
+        "prune_threshold": args.prune_threshold,
+        "lcfr_threshold": args.lcfr_threshold,
+        "discount_interval": args.discount_interval,
+        "discount_iteration_interval": args.discount_iteration_interval,
+        "regret_prune_threshold": args.regret_prune_threshold,
+        "save_interval": args.save_interval,
+    }
+    for key, value in cli_overrides.items():
+        if value is not None:
+            config[key] = value
 
-    MCCFR_P(args.time, time.time())
+    apply_training_config(config)
+    MCCFR_P(int(config["iterations"]), time.time())

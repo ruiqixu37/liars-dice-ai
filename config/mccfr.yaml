@@ -1,0 +1,8 @@
+iterations: 1000000
+strategy_interval: 1000
+prune_threshold: 7200
+lcfr_threshold: 72000
+discount_interval: 600
+discount_iteration_interval: 100
+regret_prune_threshold: -15
+save_interval: 5000
