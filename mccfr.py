@@ -1,5 +1,5 @@
 from state import State
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from game import init_player_dice, init_state
 from trie import Trie
 import time
@@ -28,6 +28,11 @@ DISCOUNT_INTERVAL = DEFAULT_TRAINING_CONFIG["discount_interval"]  # in seconds
 DISCOUNT_ITERATION_INTERVAL = DEFAULT_TRAINING_CONFIG["discount_iteration_interval"]  # in iterations
 REGRET_PRUNE_THRESHOLD = DEFAULT_TRAINING_CONFIG["regret_prune_threshold"]
 SAVE_INTERVAL = DEFAULT_TRAINING_CONFIG["save_interval"]  # in iterations
+
+# Maximum number of tries to hold in RAM at once. When the limit is hit the
+# least-recently-used entry is evicted to disk before the new one is added.
+MAX_AGENT_TRIES = 32
+MAX_OPPONENT_CACHE = 16
 
 
 def load_training_config(config_path: str) -> dict:
@@ -94,8 +99,17 @@ def parse_args() -> argparse.Namespace:
 
 global_trie = Trie()
 
-# Cache for opponent tries to avoid repeated disk I/O
-_opponent_cache = {}
+
+def _atomic_pickle(path: str, obj) -> None:
+    """Write obj to path atomically via a temp file to avoid corruption on crash."""
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        pickle.dump(obj, f)
+    os.replace(tmp, path)
+
+
+# Cache for opponent tries to avoid repeated disk I/O (OrderedDict for LRU eviction)
+_opponent_cache: OrderedDict = OrderedDict()
 
 
 def clear_opponent_cache():
@@ -243,6 +257,11 @@ def sample_opponent_action(state: State, opponent_dice: int) -> tuple:
         if os.path.exists(path):
             with open(path, "rb") as f:
                 _opponent_cache[dice_key] = pickle.load(f)
+            # Evict LRU entry if over capacity (opponent tries are read-only, no save needed)
+            while len(_opponent_cache) > MAX_OPPONENT_CACHE:
+                _opponent_cache.popitem(last=False)
+    if dice_key in _opponent_cache:
+        _opponent_cache.move_to_end(dice_key)
 
     if dice_key in _opponent_cache:
         oppoent_trie = _opponent_cache[dice_key]
@@ -384,8 +403,10 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
         previous_cumulative_time = 0
         previous_T = 0
 
-    # In-memory cache for agent tries — only load from disk on first encounter
-    agent_tries = {}
+    # In-memory cache for agent tries — only load from disk on first encounter.
+    # OrderedDict enables O(1) LRU eviction; evicted tries are saved to disk.
+    agent_tries: OrderedDict = OrderedDict()
+    dirty_dice: set = set()  # dice keys whose tries have unsaved modifications
 
     total_cumulative_time = previous_cumulative_time
     pruning_active = total_cumulative_time > PRUNE_THRESHOLD
@@ -418,7 +439,17 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
                     agent_tries[dice_key] = pickle.load(f)
             else:
                 agent_tries[dice_key] = Trie()
+            # Evict LRU entry if over capacity, saving it to disk first
+            while len(agent_tries) > MAX_AGENT_TRIES:
+                lru_key, lru_trie = next(iter(agent_tries.items()))
+                agent_tries.pop(lru_key)
+                if lru_key in dirty_dice:
+                    os.makedirs("output", exist_ok=True)
+                    _atomic_pickle(f"output/trie_{str(lru_key)}.pkl", lru_trie)
+                    dirty_dice.discard(lru_key)
+        agent_tries.move_to_end(dice_key)
         trie = agent_tries[dice_key]
+        dirty_dice.add(dice_key)
 
         # update the strategy
         if (t+1) % STRATEGY_INTERVAL == 0:
@@ -474,17 +505,17 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
                 print(f"  >>> LCFR discounting ended at {total_cumulative_time/60:.1f}min")
 
         if (t+1) % SAVE_INTERVAL == 0:
-            if not os.path.exists("output"):
-                os.makedirs("output")
+            os.makedirs("output", exist_ok=True)
 
-            # Serialize and save the Trie object
-            with open(f"output/trie_{str(state.dice)}.pkl", "wb") as f:
-                pickle.dump(trie, f)
+            # Save all dirty tries atomically (not just the current dice)
+            for dk in list(dirty_dice):
+                if dk in agent_tries:
+                    _atomic_pickle(f"output/trie_{str(dk)}.pkl", agent_tries[dk])
+            dirty_dice.clear()
 
             # Serialize and save the time record
-            with open("output/time.pkl", "wb") as f:
-                pickle.dump({'cumulative_time': total_cumulative_time,
-                            'T': t + previous_T}, f)
+            _atomic_pickle("output/time.pkl", {'cumulative_time': total_cumulative_time,
+                                               'T': t + previous_T})
 
         # Strategy update report
         if (t+1) % STRATEGY_INTERVAL == 0:

@@ -145,18 +145,15 @@ def test_save_load_filename_consistency():
 
     source = inspect.getsource(mccfr.MCCFR_P)
 
-    # Count occurrences of the save pattern
-    # After fix, save should use state.dice, not str(state)
+    # Load path uses state.dice; save loop uses dk (the dice key). Both resolve
+    # to the same value — verify neither accidentally uses the full state string.
     assert 'trie_{str(state.dice)}.pkl' in source, \
-        "Save should use trie_{str(state.dice)}.pkl"
-
-    # The old buggy pattern should not appear
-    # Note: str(state) without .dice would produce the full state string
-    # We check that save and load use the same pattern
-    save_pattern_count = source.count('trie_{str(state.dice)}.pkl')
-    # Should appear at least twice: once for load, once for save
-    assert save_pattern_count >= 2, \
-        f"Expected trie_{{str(state.dice)}}.pkl to appear at least twice, found {save_pattern_count}"
+        "Load path should use trie_{str(state.dice)}.pkl"
+    assert 'trie_{str(state)}.pkl' not in source, \
+        "Filename must not use str(state) (full state string) — should use .dice"
+    # Save loop uses the dirty-dice key variable
+    assert 'trie_{str(dk)}.pkl' in source, \
+        "Save loop should use trie_{str(dk)}.pkl"
 
 
 # --- Bug 5: Wild-one face wraparound ---
