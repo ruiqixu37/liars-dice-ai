@@ -47,9 +47,14 @@ python mccfr.py --config path/to/mccfr.yaml
 
 # Optionally override config values from CLI
 python mccfr.py --iterations 10000 --prune-threshold 5400 --save-interval 50
+
+# Train with multiple parallel workers (partitions dice keys across processes)
+python mccfr.py --workers 4
 ```
 
 Training prints progress every 100 iterations — iteration speed, ETA, unique dice seen, trie size, and phase transitions (pruning activation, LCFR end). Models are saved to `output/` every `save_interval` iterations (default `5000`) and training can be resumed by running the command again.
+
+When using `--workers N`, the 7776 possible dice configurations are partitioned across N processes. Each worker trains independently on its assigned dice keys and writes to separate trie files, so there are no conflicts. Opponent strategies are read from disk as stale snapshots, which is safe for convergence.
 
 ## Playing
 

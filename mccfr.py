@@ -2,6 +2,7 @@ from state import State
 from collections import defaultdict, OrderedDict
 from game import init_player_dice, init_state
 from trie import Trie
+import multiprocessing
 import time
 import numpy as np
 import os
@@ -72,6 +73,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="config/mccfr.yaml")
     parser.add_argument("--iterations", type=int, default=None)
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Number of parallel worker processes (default: 1)")
 
     # Optional per-parameter CLI overrides (take precedence over YAML).
     parser.add_argument("--strategy-interval", type=int, default=None)
@@ -98,6 +101,27 @@ def parse_args() -> argparse.Namespace:
 # GLOBAL_DICT = defaultdict(lambda: [0.0, 0.0, 0.0, False, 0.0])
 
 global_trie = Trie()
+
+
+def _all_dice_keys() -> list:
+    """Enumerate all 6^5 = 7776 possible 5-dice combinations."""
+    keys = []
+    for d1 in range(1, 7):
+        for d2 in range(1, 7):
+            for d3 in range(1, 7):
+                for d4 in range(1, 7):
+                    for d5 in range(1, 7):
+                        keys.append(d1*10000 + d2*1000 + d3*100 + d4*10 + d5)
+    return keys
+
+
+def _partition_dice(num_workers: int) -> list:
+    """Partition all dice keys into num_workers groups via round-robin."""
+    all_keys = _all_dice_keys()
+    partitions = [[] for _ in range(num_workers)]
+    for i, k in enumerate(all_keys):
+        partitions[i % num_workers].append(k)
+    return partitions
 
 
 def _atomic_pickle(path: str, obj) -> None:
@@ -386,16 +410,26 @@ def traverse_mccfr_p(state: State, opponent_dice: int, trie: Trie) -> float:
         return traverse_mccfr_p(child_state, opponent_dice, trie)
 
 
-def MCCFR_P(T: int, start_time: float) -> defaultdict:
+def MCCFR_P(T: int, start_time: float, dice_subset: list = None,
+            worker_id: int = None) -> defaultdict:
     """
     :param T: number of iterations
+    :param dice_subset: if provided, only train on these dice keys
+    :param worker_id: worker index (used for per-worker time tracking)
 
     Returns a dictionary of the first round betting strategies
     """
 
+    # Worker label for log messages
+    w_label = f"[W{worker_id}] " if worker_id is not None else ""
+
+    # Per-worker time file to avoid conflicts between parallel processes
+    time_file = (f"output/time_w{worker_id}.pkl"
+                 if worker_id is not None else "output/time.pkl")
+
     # determine if there is a previous time record file in the output directory
-    if os.path.exists("output/time.pkl"):
-        with open("output/time.pkl", "rb") as f:
+    if os.path.exists(time_file):
+        with open(time_file, "rb") as f:
             previous_time_record = pickle.load(f)
             previous_cumulative_time = previous_time_record['cumulative_time']
             previous_T = previous_time_record['T']
@@ -411,26 +445,33 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
     total_cumulative_time = previous_cumulative_time
     pruning_active = total_cumulative_time > PRUNE_THRESHOLD
     lcfr_active = total_cumulative_time < LCFR_TRESHOLD
-    last_report_time = 0.0
     iter_times = []  # track recent iteration durations for speed estimate
 
-    print(f"{'='*60}")
-    print(f"  MCCFR Training — {T-1} iterations")
+    print(f"{w_label}{'='*60}")
+    print(f"{w_label}  MCCFR Training — {T-1} iterations")
+    if dice_subset is not None:
+        print(f"{w_label}  Dice partition: {len(dice_subset)} keys")
     if previous_T > 0:
-        print(f"  Resuming from iteration {previous_T} ({previous_cumulative_time/3600:.2f}h)")
-    print(f"  Pruning threshold: {PRUNE_THRESHOLD/60:.0f}min | LCFR threshold: {LCFR_TRESHOLD/60:.0f}min")
-    print(f"  Pruning: {'ON' if pruning_active else 'OFF'} | LCFR discounting: {'ON' if lcfr_active else 'OFF'}")
-    print(f"{'='*60}")
+        print(f"{w_label}  Resuming from iteration {previous_T} ({previous_cumulative_time/3600:.2f}h)")
+    print(f"{w_label}  Pruning threshold: {PRUNE_THRESHOLD/60:.0f}min | LCFR threshold: {LCFR_TRESHOLD/60:.0f}min")
+    print(f"{w_label}  Pruning: {'ON' if pruning_active else 'OFF'} | LCFR discounting: {'ON' if lcfr_active else 'OFF'}")
+    print(f"{w_label}{'='*60}")
 
     for t in range(1, T):
         iter_start = time.time()
-        random.seed(37 + t)
-        np.random.seed(37 + t)
+        seed = 37 + t if worker_id is None else 37 + t + worker_id * T
+        random.seed(seed)
+        np.random.seed(seed)
         time_elasped = time.time() - start_time
         total_cumulative_time = time_elasped + previous_cumulative_time
 
-        # init the state
-        state = init_state(State([]))
+        # init the state — pick from our dice partition if running in parallel
+        if dice_subset is not None:
+            state = State([])
+            state.dice = random.choice(dice_subset)
+            state.first_act = random.choice([True, False])
+        else:
+            state = init_state(State([]))
         dice_key = state.dice
         if dice_key not in agent_tries:
             path = f"output/trie_{str(state.dice)}.pkl"
@@ -492,7 +533,7 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             lcfr_active = total_cumulative_time < LCFR_TRESHOLD
 
             trie_nodes = len(trie.data)
-            print(f"  [{pct:5.1f}%] iter {t + previous_T:>7d} | "
+            print(f"{w_label}  [{pct:5.1f}%] iter {t + previous_T:>7d} | "
                   f"{time_elasped/60:6.1f}min | "
                   f"{avg_speed:.1f} it/s | "
                   f"ETA {remaining/60:.1f}min | "
@@ -500,9 +541,9 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
                   f"trie nodes: {trie_nodes:,}")
 
             if pruning_active and not was_pruning:
-                print(f"  >>> Pruning activated at {total_cumulative_time/60:.1f}min")
+                print(f"{w_label}  >>> Pruning activated at {total_cumulative_time/60:.1f}min")
             if not lcfr_active and was_lcfr:
-                print(f"  >>> LCFR discounting ended at {total_cumulative_time/60:.1f}min")
+                print(f"{w_label}  >>> LCFR discounting ended at {total_cumulative_time/60:.1f}min")
 
         if (t+1) % SAVE_INTERVAL == 0:
             os.makedirs("output", exist_ok=True)
@@ -514,23 +555,33 @@ def MCCFR_P(T: int, start_time: float) -> defaultdict:
             dirty_dice.clear()
 
             # Serialize and save the time record
-            _atomic_pickle("output/time.pkl", {'cumulative_time': total_cumulative_time,
-                                               'T': t + previous_T})
+            _atomic_pickle(time_file, {'cumulative_time': total_cumulative_time,
+                                       'T': t + previous_T})
 
         # Strategy update report
         if (t+1) % STRATEGY_INTERVAL == 0:
-            print(f"  --- Strategy updated for dice {state.dice} "
+            print(f"{w_label}  --- Strategy updated for dice {state.dice} "
                   f"(trie nodes: {len(trie.data):,})")
 
-    print(f"{'='*60}")
-    print(f"  Training complete: {T-1} iterations in {time_elasped/3600:.2f}h")
-    print(f"  Total iterations (all sessions): {T - 1 + previous_T}")
-    print(f"  Total time (all sessions): {total_cumulative_time/3600:.2f}h")
-    print(f"  Unique dice trained: {len(agent_tries)}")
+    print(f"{w_label}{'='*60}")
+    print(f"{w_label}  Training complete: {T-1} iterations in {time_elasped/3600:.2f}h")
+    print(f"{w_label}  Total iterations (all sessions): {T - 1 + previous_T}")
+    print(f"{w_label}  Total time (all sessions): {total_cumulative_time/3600:.2f}h")
+    print(f"{w_label}  Unique dice trained: {len(agent_tries)}")
     total_nodes = sum(len(t.data) for t in agent_tries.values())
-    print(f"  Total trie nodes across all dice: {total_nodes:,}")
-    print(f"{'='*60}")
+    print(f"{w_label}  Total trie nodes across all dice: {total_nodes:,}")
+    print(f"{w_label}{'='*60}")
     return trie
+
+
+def _worker_train(worker_id: int, num_workers: int, config: dict) -> None:
+    """Entry point for a single worker process."""
+    apply_training_config(config)
+    partitions = _partition_dice(num_workers)
+    dice_subset = partitions[worker_id]
+    print(f"[W{worker_id}] Starting with {len(dice_subset)} dice keys")
+    MCCFR_P(int(config["iterations"]), time.time(),
+            dice_subset=dice_subset, worker_id=worker_id)
 
 
 if __name__ == "__main__":
@@ -552,4 +603,27 @@ if __name__ == "__main__":
             config[key] = value
 
     apply_training_config(config)
-    MCCFR_P(int(config["iterations"]), time.time())
+    num_workers = args.workers
+
+    if num_workers <= 1:
+        MCCFR_P(int(config["iterations"]), time.time())
+    else:
+        os.makedirs("output", exist_ok=True)
+        processes = []
+        for wid in range(num_workers):
+            p = multiprocessing.Process(
+                target=_worker_train,
+                args=(wid, num_workers, config),
+            )
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join()
+
+        # Report exit status
+        failed = [i for i, p in enumerate(processes) if p.exitcode != 0]
+        if failed:
+            print(f"Workers {failed} exited with errors")
+        else:
+            print(f"All {num_workers} workers finished successfully")
